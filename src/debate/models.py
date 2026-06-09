@@ -23,17 +23,21 @@ class SourceConfig(BaseModel):
 
 
 class RawDocument(BaseModel):
+    doc_id: str = Field(min_length=1)
     party: str
+    source_owner: str | None = None
     source_kind: str
     title: str
     url: HttpUrl
+    content_hash: str | None = None
     text: str
     fetched_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 
 class DocumentChunk(BaseModel):
-    id: str
+    chunk_id: str
+    doc_id: str
     party: str
     source_kind: str
     title: str
@@ -41,6 +45,10 @@ class DocumentChunk(BaseModel):
     text: str
     chunk_index: int = Field(ge=0)
     metadata: dict[str, Any] = Field(default_factory=dict)
+
+    @property
+    def id(self) -> str:
+        return self.chunk_id
 
 
 class Evidence(BaseModel):

@@ -8,11 +8,15 @@ version = "0.1.0"
 description = "Svensk partiledardebatt-simulator med konfigurationsdrivna parti-agenter."
 requires-python = ">=3.11"
 dependencies = [
+  "beautifulsoup4>=4.12.0",
   "chromadb>=0.5.0",
   "langgraph>=0.2.0",
   "openai>=1.40.0",
   "pydantic>=2.7.0",
+  "pypdf>=4.0.0",
   "PyYAML>=6.0.0",
+  "requests>=2.31.0",
+  "trafilatura>=1.9.0",
 ]
 
 [project.optional-dependencies]

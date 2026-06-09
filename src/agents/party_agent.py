@@ -7,7 +7,13 @@ from rag.retriever import PartyRetriever
 class PartyAgent:
     def __init__(self, party: PartyConfig, retriever: PartyRetriever | None = None) -> None:
         self.party = party
-        self.retriever = retriever or PartyRetriever()
+        self._retriever = retriever
+
+    @property
+    def retriever(self) -> PartyRetriever:
+        if self._retriever is None:
+            self._retriever = PartyRetriever()
+        return self._retriever
 
     def answer(self, question: str) -> PartyResponse:
         chunks = self.retriever.retrieve(question, party=self.party.id)

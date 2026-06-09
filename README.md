@@ -26,6 +26,26 @@ Kör CLI-stommen:
 python app.py "Vad vill ni göra åt klimatet?" --party S --party MP
 ```
 
+## Ingest och RAG
+
+Pipeline för lokala partikällor:
+
+```bash
+python -m src.ingest.ingest_party_sources
+python -m src.ingest.chunking
+python -m src.rag.vector_store
+```
+
+Detta läser explicita URL:er från `data/config/sources.yaml`, extraherar text från HTML/PDF, skriver normaliserad JSONL till `data/processed/party_sources.jsonl`, chunkar till `data/processed/chunks.jsonl` och bygger ett lokalt Chroma-index i `data/index`.
+
+Riksdagens öppna data är valfritt och ska ses som extra material:
+
+```bash
+python -m src.ingest.ingest_riksdag --party S --riksmote 2025/26 --limit 20
+```
+
+Om Riksdagen-API:t ändrar struktur eller inte svarar loggas en varning. Partidebatten ska fortfarande fungera med bara partikällorna.
+
 ## Lägga till ett parti
 
 1. Lägg till partiet i `data/config/parties.yaml`.
@@ -51,13 +71,16 @@ Första versionen fokuserar på:
 - robust config och validering
 - Pydantic-scheman för debatt, påståenden och evidens
 - dynamiskt skapade parti-agenter
+- ingest av explicita officiella URL:er
+- lokal chunking och Chroma-baserat vector index
 - CLI som lokal körbar yta
 - testbar grund för senare RAG och LangGraph-flöden
 
 ## Kända begränsningar
 
-- Ingestion hämtar inte webbsidor ännu.
-- Chroma-gränssnittet är en stub och gör ingen embedding-sökning ännu.
-- Parti-svaren är placeholders tills officiella källor har indexerats.
+- Ingestion är inte en crawler och följer inte länkar automatiskt.
+- HTML/PDF-extraktion är bäst-försök och kan behöva per-källa-justering.
+- Vector store använder en enkel lokal hash-embedding för demo; byt till riktiga embeddings för bättre semantisk träffsäkerhet.
+- Parti-svaren är fortfarande förenklade tills LLM-svar kopplas hårdare till evidens.
 - Faktagranskning, väljarpanel och summering är förenklade för hackaton.
 - Streamlit UI är inte påbörjat.

@@ -1,3 +1,14 @@
+# Part-debate ignore
+# Generated data
+data/raw/*
+data/processed/*
+data/index/*
+
+# Keep folders in git
+!data/raw/.gitkeep
+!data/processed/.gitkeep
+!data/index/.gitkeep
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[codz]
