@@ -1,0 +1,15 @@
+parties:
+  - id: S
+    name: Socialdemokraterna
+    display_name: Socialdemokraterna
+    color_hint: red
+
+  - id: M
+    name: Moderaterna
+    display_name: Moderaterna
+    color_hint: blue
+
+  - id: MP
+    name: Miljöpartiet
+    display_name: Miljöpartiet
+    color_hint: green

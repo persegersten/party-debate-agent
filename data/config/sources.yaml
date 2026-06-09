@@ -1,0 +1,30 @@
+sources:
+  - party: S
+    source_kind: party_program
+    title: Socialdemokraternas partiprogram och riktlinjer
+    url: "https://www.socialdemokraterna.se/var-politik/partiprogram-och-riktlinjer"
+
+  - party: S
+    source_kind: policy_index
+    title: Socialdemokraterna - Vår politik
+    url: "https://www.socialdemokraterna.se/var-politik"
+
+  - party: M
+    source_kind: ideology
+    title: Moderaternas idéprogram
+    url: "https://moderaterna.se/ideprogram/"
+
+  - party: M
+    source_kind: policy_index
+    title: Moderaterna - Vår politik
+    url: "https://moderaterna.se/var-politik/"
+
+  - party: MP
+    source_kind: party_program
+    title: Miljöpartiets partiprogram
+    url: "https://www.mp.se/om/partiprogram/"
+
+  - party: MP
+    source_kind: policy_index
+    title: Miljöpartiets politik
+    url: "https://www.mp.se/politik/"
