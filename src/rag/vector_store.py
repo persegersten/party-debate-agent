@@ -22,14 +22,24 @@ class HashEmbeddingFunction:
     def __init__(self, dimensions: int = 384) -> None:
         self.dimensions = dimensions
 
-    def __call__(self, input: list[str]) -> list[list[float]]:  # noqa: A002 - Chroma expects this name.
-        return [self.embed(text) for text in input]
+    def __call__(self, input: str | list[str]) -> list[list[float]]:  # noqa: A002 - Chroma expects this name.
+        return self._embed_many(input)
+
+    def embed_query(self, input: str | list[str]) -> list[list[float]]:  # noqa: A002 - Chroma-compatible API.
+        return self._embed_many(input)
+
+    def embed_documents(self, input: str | list[str]) -> list[list[float]]:  # noqa: A002 - Chroma-compatible API.
+        return self._embed_many(input)
 
     def name(self) -> str:
         return "default"
 
     def is_legacy(self) -> bool:
         return True
+
+    def _embed_many(self, input: str | list[str]) -> list[list[float]]:  # noqa: A002 - keeps Chroma naming.
+        texts = [input] if isinstance(input, str) else input
+        return [self.embed(text) for text in texts]
 
     def embed(self, text: str) -> list[float]:
         vector = [0.0] * self.dimensions
