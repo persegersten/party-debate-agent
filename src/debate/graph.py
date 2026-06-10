@@ -4,7 +4,7 @@ from collections.abc import Callable
 
 from agents.llm_client import OpenAIPartyAnswerClient
 from agents.party_agent import PartyAgent
-from agents.voter_panel import evaluate_voter_panel
+from agents.voter_panel import SpiceLevel, evaluate_voter_panel
 from debate.models import DebateState, ProjectConfig, load_project_config
 
 
@@ -33,7 +33,7 @@ def _moderator_summary(state: DebateState) -> str:
     )
 
 
-def build_debate_graph(config: ProjectConfig | None = None) -> Callable:
+def build_debate_graph(config: ProjectConfig | None = None, spice_level: SpiceLevel = "lively") -> Callable:
     try:
         from langgraph.graph import END, StateGraph
     except ModuleNotFoundError as exc:
@@ -62,7 +62,7 @@ def build_debate_graph(config: ProjectConfig | None = None) -> Callable:
         return state
 
     def voter_panel(state: DebateState) -> DebateState:
-        return evaluate_voter_panel(state)
+        return evaluate_voter_panel(state, spice_level=spice_level)
 
     graph.add_node("opening_round", opening_round)
     graph.add_node("rebuttal_round", rebuttal_round)

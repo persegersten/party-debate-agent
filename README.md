@@ -24,7 +24,31 @@ Kör CLI-stommen:
 
 ```bash
 python app.py "Vad vill ni göra åt klimatet?" --party S --party MP
+python app.py --topic "skolan" --parties S M MP --spice-level wild
 ```
+
+`--spice-level` styr bara väljarpanelens språk:
+
+- `calm`: sakligt och lågmält.
+- `lively`: mer personligt och lite syrligt. Detta är default.
+- `wild`: mer demo-vänligt, humoristiskt och metaforiskt, men fortfarande sakligt.
+
+## Väljarpanel
+
+Väljarpanelen körs i två separata steg:
+
+1. `score_voter_decision` gör deterministisk scoring per persona och parti.
+2. `render_voter_reaction` formulerar beslutet med personans egen röst.
+
+Scoringen använder ingen slump. Den väger in hur väl svaret matchar personans prioriteringar, hur tydligt svaret är, källstöd och om svaret verkar undvikande. Vid lika score används partiordningen deterministiskt som tie-break. Renderingen får aldrig byta valt parti och får inte hitta på nya sakuppgifter; den får bara formulera beslutets redan framräknade skäl mer personligt.
+
+Väljarnas ton ligger i `DEFAULT_PERSONAS` i `src/agents/voter_panel.py`. Lägg till en ny persona genom att skapa en `VoterPersona` med:
+
+- `id` och `name`
+- `priorities`, till exempel `["klimat", "jobb"]`
+- `voice`, med `tone`, `sentence_style`, `favorite_phrases`, `skepticism_phrases` och `metaphor_domains`
+
+Panelen är en simulering av fiktiva väljartyper. Den är till för att göra debatt-output lättare att jämföra och demonstrera, inte för att mäta opinion eller förutsäga verkliga väljarrörelser.
 
 ## Ingest och RAG
 

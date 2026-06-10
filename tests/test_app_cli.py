@@ -29,6 +29,19 @@ def test_parse_args_accepts_explicit_topic(monkeypatch) -> None:
     assert args.topic == "välfärd"
 
 
+def test_parse_args_accepts_parties_and_spice_level(monkeypatch) -> None:
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["app.py", "--topic", "skolan", "--parties", "S", "M", "MP", "--spice-level", "wild"],
+    )
+
+    args = app.parse_args()
+
+    assert args.parties == ["S", "M", "MP"]
+    assert args.spice_level == "wild"
+
+
 def test_main_prints_voter_panel_disclaimer(monkeypatch, capsys) -> None:
     monkeypatch.setattr(sys, "argv", ["app.py", "Vad vill ni göra?", "--party", "S"])
     monkeypatch.setattr(
@@ -52,7 +65,7 @@ def test_main_prints_voter_panel_disclaimer(monkeypatch, capsys) -> None:
             ]
             return state
 
-    monkeypatch.setattr(app, "build_debate_graph", lambda _config: FakeGraph())
+    monkeypatch.setattr(app, "build_debate_graph", lambda _config, spice_level="lively": FakeGraph())
 
     app.main()
 

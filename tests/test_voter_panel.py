@@ -2,8 +2,16 @@ from __future__ import annotations
 
 import re
 
-from agents.voter_panel import DEFAULT_PERSONAS, SIMULATION_DISCLAIMER, VoterPanel, score_response
-from debate.models import DebateState, Evidence, PartyResponse, VoterPersona
+from agents.voter_panel import (
+    DEFAULT_PERSONAS,
+    SIMULATION_DISCLAIMER,
+    VoterPanel,
+    render_voter_reaction,
+    run_voter_panel,
+    score_response,
+    score_voter_decision,
+)
+from debate.models import DebateState, Evidence, PartyResponse, VoterDecision, VoterPersona
 
 
 def evidence(title: str = "Källa") -> Evidence:
@@ -96,6 +104,89 @@ def test_every_persona_selects_active_party() -> None:
     assert all(reaction.party in reaction.reaction for reaction in reactions)
     assert any("klimat" in reaction.reaction.lower() for reaction in reactions)
     assert any("välfärd" in reaction.reaction.lower() for reaction in reactions)
+
+
+def test_voter_scoring_is_deterministic() -> None:
+    persona = DEFAULT_PERSONAS[1]
+    responses = {
+        "M": response("M", "Vi talar om ekonomi och regler med tydliga reformer."),
+        "MP": response("MP", "Vi prioriterar klimat, bostad och framtidstro med tydliga reformer."),
+    }
+
+    first = score_voter_decision(persona, responses, [])
+    second = score_voter_decision(persona, responses, [])
+
+    assert first == second
+
+
+def test_rendering_does_not_change_selected_party() -> None:
+    persona = DEFAULT_PERSONAS[0]
+    decision = VoterDecision(
+        persona_id=persona.id,
+        selected_party="S",
+        score_by_party={"S": 4.0, "M": 2.0},
+        strongest_reason="svaret träffade trygghet",
+        biggest_concern="källstödet var tunt",
+        evidence_quality="medium",
+    )
+
+    reaction = render_voter_reaction(persona, decision, {"S": response("S", "Trygghet och vård.")})
+
+    assert reaction.selected_party == "S"
+
+
+def test_reactions_have_unique_one_liners() -> None:
+    reactions = run_voter_panel(
+        {
+            "M": response("M", "Trygghet, ekonomi, regler och klimat är våra prioriteringar i svaret."),
+            "S": response("S", "Välfärd, vård, pensioner och arbetsvillkor är våra prioriteringar."),
+        },
+        [],
+    )
+
+    one_liners = [reaction.one_liner for reaction in reactions]
+    assert len(one_liners) == len(set(one_liners))
+
+
+def test_reaction_max_three_sentences() -> None:
+    reactions = run_voter_panel(
+        {
+            "M": response("M", "Trygghet, ekonomi, regler och klimat är våra prioriteringar i svaret."),
+            "S": response("S", "Välfärd, vård, pensioner och arbetsvillkor är våra prioriteringar."),
+        },
+        [],
+        spice_level="wild",
+    )
+
+    assert reactions
+    assert all(_sentence_count(reaction.reaction) <= 3 for reaction in reactions)
+
+
+def test_spice_level_wild_is_more_expressive_than_calm() -> None:
+    party_responses = {
+        "MP": response("MP", "Klimat, jobb och trovärdighet är våra prioriteringar i konkreta steg."),
+        "S": response("S", "Vård, pensioner och trygghet är våra prioriteringar i konkreta steg."),
+    }
+
+    calm = run_voter_panel(party_responses, [], spice_level="calm")
+    wild = run_voter_panel(party_responses, [], spice_level="wild")
+
+    assert [reaction.reaction for reaction in wild] != [reaction.reaction for reaction in calm]
+
+
+def test_no_empty_reactions() -> None:
+    reactions = run_voter_panel(
+        {
+            "M": response("M", "Trygghet, ekonomi, regler och klimat är våra prioriteringar i svaret."),
+            "S": response("S", "Välfärd, vård, pensioner och arbetsvillkor är våra prioriteringar."),
+        },
+        [],
+    )
+
+    assert reactions
+    assert all(reaction.one_liner.strip() for reaction in reactions)
+    assert all(reaction.reasoning.strip() for reaction in reactions)
+    assert all(reaction.concern.strip() for reaction in reactions)
 
 
 def test_simulation_disclaimer_text() -> None:

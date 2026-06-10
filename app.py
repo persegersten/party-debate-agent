@@ -3,6 +3,10 @@ from __future__ import annotations
 import argparse
 import logging
 import os
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent / "src"))
 
 from debate.graph import build_debate_graph
 from debate.models import DebateState, load_project_config
@@ -13,7 +17,14 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Svensk partiledardebatt-simulator")
     parser.add_argument("question", nargs="?", default="Vad vill ni göra åt klimatet?")
     parser.add_argument("--topic", default=None)
-    parser.add_argument("--party", action="append", dest="parties", help="Parti-id att inkludera, kan anges flera gånger.")
+    parser.add_argument("--party", action="append", dest="party", help="Parti-id att inkludera, kan anges flera gånger.")
+    parser.add_argument("--parties", nargs="+", default=None, help="Parti-id:n att inkludera, exempel: --parties S M MP.")
+    parser.add_argument(
+        "--spice-level",
+        choices=["calm", "lively", "wild"],
+        default="lively",
+        help="Språknivå för väljarpanelen.",
+    )
     return parser.parse_args()
 
 
@@ -26,12 +37,12 @@ def main() -> None:
     args = parse_args()
     config = load_project_config()
     known_parties = config.party_by_id()
-    active_parties = args.parties or list(known_parties)
+    active_parties = args.parties or args.party or list(known_parties)
     unknown = sorted(set(active_parties) - set(known_parties))
     if unknown:
         raise SystemExit(f"Okända partier: {', '.join(unknown)}")
 
-    graph = build_debate_graph(config)
+    graph = build_debate_graph(config, spice_level=args.spice_level)
     topic = args.topic or "frågan"
     logging.getLogger(__name__).info("Resolved debate question=%r topic=%r", args.question, topic)
     state = DebateState(topic=topic, question=args.question, active_parties=active_parties)

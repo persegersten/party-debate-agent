@@ -78,18 +78,80 @@ class FactCheckResult(BaseModel):
     evidence: list[Evidence] = Field(default_factory=list)
 
 
+class VoterVoiceProfile(BaseModel):
+    tone: str = ""
+    sentence_style: str = ""
+    favorite_phrases: list[str] = Field(default_factory=list)
+    skepticism_phrases: list[str] = Field(default_factory=list)
+    metaphor_domains: list[str] = Field(default_factory=list)
+
+
 class VoterPersona(BaseModel):
     id: str = Field(min_length=1)
     name: str = Field(min_length=1)
     priorities: list[str] = Field(default_factory=list)
     description: str = ""
+    voice: VoterVoiceProfile = Field(default_factory=VoterVoiceProfile)
+
+
+class VoterDecision(BaseModel):
+    persona_id: str
+    selected_party: str
+    score_by_party: dict[str, float]
+    strongest_reason: str
+    biggest_concern: str
+    evidence_quality: Literal["weak", "medium", "strong"]
 
 
 class VoterReaction(BaseModel):
-    voter: VoterPersona
-    party: str
-    reaction: str
-    score: int = Field(ge=1, le=5)
+    persona_id: str
+    persona_name: str
+    selected_party: str
+    one_liner: str
+    reasoning: str
+    concern: str
+
+    @model_validator(mode="before")
+    @classmethod
+    def accept_legacy_shape(cls, data: Any) -> Any:
+        if not isinstance(data, dict) or "selected_party" in data:
+            return data
+        voter = data.get("voter")
+        if isinstance(voter, VoterPersona):
+            persona_id = voter.id
+            persona_name = voter.name
+        elif isinstance(voter, dict):
+            persona_id = voter.get("id", "")
+            persona_name = voter.get("name", "")
+        else:
+            persona_id = data.get("persona_id", "")
+            persona_name = data.get("persona_name", "")
+        reaction = data.get("reaction", "")
+        return {
+            "persona_id": persona_id,
+            "persona_name": persona_name,
+            "selected_party": data.get("party", ""),
+            "one_liner": reaction,
+            "reasoning": "",
+            "concern": "",
+        }
+
+    @property
+    def voter(self) -> VoterPersona:
+        return VoterPersona(id=self.persona_id, name=self.persona_name)
+
+    @property
+    def party(self) -> str:
+        return self.selected_party
+
+    @property
+    def reaction(self) -> str:
+        parts = [self.one_liner, self.reasoning, self.concern]
+        return " ".join(part.strip() for part in parts if part.strip())
+
+    @property
+    def score(self) -> int:
+        return 3
 
 
 class DebateState(BaseModel):
