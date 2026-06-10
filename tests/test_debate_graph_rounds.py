@@ -46,6 +46,8 @@ def test_debate_graph_runs_opening_rebuttal_and_summary(monkeypatch) -> None:
     assert [response.answer for response in state.rebuttals] == ["S rebuttal", "M rebuttal"]
     assert state.summary
     assert "Moderator:" in state.summary
+    assert len(state.voter_reactions) == 5
+    assert {reaction.party for reaction in state.voter_reactions} <= {"S", "M"}
     assert calls == [
         "answer:S:Vad vill ni göra?",
         "answer:M:Vad vill ni göra?",

@@ -6,6 +6,7 @@ import os
 
 from debate.graph import build_debate_graph
 from debate.models import DebateState, load_project_config
+from agents.voter_panel import SIMULATION_DISCLAIMER
 
 
 def parse_args() -> argparse.Namespace:
@@ -38,6 +39,7 @@ def main() -> None:
     responses = result.responses if isinstance(result, DebateState) else result["responses"]
     rebuttals = result.rebuttals if isinstance(result, DebateState) else result["rebuttals"]
     summary = result.summary if isinstance(result, DebateState) else result.get("summary")
+    voter_reactions = result.voter_reactions if isinstance(result, DebateState) else result["voter_reactions"]
 
     print("\n=== Opening Round ===")
     for response in responses:
@@ -49,6 +51,12 @@ def main() -> None:
 
     print("\n=== Moderator Summary ===")
     print(summary or "Moderator: Ingen summering tillgänglig.")
+
+    print("\n=== Väljarpanel ===")
+    print(SIMULATION_DISCLAIMER)
+    for reaction in voter_reactions:
+        print(f"\n[{reaction.voter.name}] väljer {reaction.party}")
+        print(f"Motivering: {reaction.reaction}")
 
 
 if __name__ == "__main__":

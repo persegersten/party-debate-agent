@@ -4,6 +4,7 @@ from collections.abc import Callable
 
 from agents.llm_client import OpenAIPartyAnswerClient
 from agents.party_agent import PartyAgent
+from agents.voter_panel import evaluate_voter_panel
 from debate.models import DebateState, ProjectConfig, load_project_config
 
 
@@ -60,11 +61,16 @@ def build_debate_graph(config: ProjectConfig | None = None) -> Callable:
         state.summary = _moderator_summary(state)
         return state
 
+    def voter_panel(state: DebateState) -> DebateState:
+        return evaluate_voter_panel(state)
+
     graph.add_node("opening_round", opening_round)
     graph.add_node("rebuttal_round", rebuttal_round)
     graph.add_node("moderator_summary", moderator_summary)
+    graph.add_node("voter_panel", voter_panel)
     graph.set_entry_point("opening_round")
     graph.add_edge("opening_round", "rebuttal_round")
     graph.add_edge("rebuttal_round", "moderator_summary")
-    graph.add_edge("moderator_summary", END)
+    graph.add_edge("moderator_summary", "voter_panel")
+    graph.add_edge("voter_panel", END)
     return graph.compile()
