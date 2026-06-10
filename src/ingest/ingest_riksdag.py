@@ -6,12 +6,14 @@ import html
 import json
 import logging
 import os
+from collections import Counter
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
 import requests
 from bs4 import BeautifulSoup
+from pipeline_stats import text_stats
 
 LOGGER = logging.getLogger(__name__)
 DEFAULT_OUTPUT_PATH = Path("data/processed/riksdag_sources.jsonl")
@@ -20,6 +22,7 @@ RIKSDAG_DOCUMENT_URL = "https://data.riksdagen.se/dokument"
 USER_AGENT = "party-debate-agent/0.1 hackathon"
 REQUEST_TIMEOUT = 30
 MIN_TEXT_LENGTH = 200
+SUSPICIOUS_TEXT_LENGTH = 50_000
 
 
 def clean_text(text: str) -> str:
@@ -107,19 +110,12 @@ def extract_party(record: dict[str, Any]) -> str | None:
     return _first_string(record, ("parti", "partibet", "parti_id", "intressent_id"))
 
 
-def extract_inline_text(record: dict[str, Any]) -> str | None:
-    text = _first_string(
-        record,
-        (
-            "anforandetext",
-            "anf_text",
-            "text",
-            "dokument_text",
-            "dokumenttext",
-            "html",
-            "content",
-        ),
-    )
+def extract_anforande_id(record: dict[str, Any]) -> str | None:
+    return _first_string(record, ("anforande_id", "anförande_id", "anf_id"))
+
+
+def extract_anforandetext(record: dict[str, Any]) -> str | None:
+    text = _first_string(record, ("anforandetext", "anf_text"))
     if not text:
         return None
     cleaned = clean_text(text)
@@ -166,6 +162,10 @@ def _response_text_to_document_text(text: str, content_type: str) -> str:
         return clean_text(text)
 
     soup = BeautifulSoup(text, "html.parser")
+    speech_text = soup.find("anforandetext")
+    if speech_text:
+        unescaped = html.unescape(speech_text.get_text("\n"))
+        return _html_to_text(unescaped)
     embedded_html = soup.find("html")
     if embedded_html:
         unescaped = html.unescape(embedded_html.get_text("\n"))
@@ -173,58 +173,52 @@ def _response_text_to_document_text(text: str, content_type: str) -> str:
     return _html_to_text(text)
 
 
-def _text_urls_from_record(record: dict[str, Any]) -> list[str]:
-    candidates: list[str] = []
-    for key in ("dokument_url_text", "dokument_url_txt", "text_url", "url_text"):
+def _urls_from_record(record: dict[str, Any], keys: tuple[str, ...]) -> list[str]:
+    candidates = []
+    for key in keys:
         value = _first_string(record, (key,))
         if value:
             candidates.append(value)
-    generic_url = extract_document_url(record)
-    if generic_url and generic_url.lower().endswith(".txt"):
-        candidates.append(generic_url)
     return list(dict.fromkeys(candidates))
 
 
-def fetch_document_text(record: dict[str, Any], session: requests.Session) -> str | None:
-    inline_text = extract_inline_text(record)
+def _fetch_document_text_with_source(record: dict[str, Any], session: requests.Session) -> tuple[str | None, str]:
+    inline_text = extract_anforandetext(record)
     if inline_text:
-        return inline_text
+        return inline_text, "inline_anforandetext"
 
     dok_id = extract_dok_id(record)
     attempted: list[str] = []
-    for url in _text_urls_from_record(record):
-        attempted.append(url)
-        text, error, content_type = _fetch_url_text(session, url)
-        if error:
-            LOGGER.debug("Could not fetch Riksdagen text URL for dok_id=%s url=%s: %s", dok_id, url, error)
-            continue
-        cleaned = _response_text_to_document_text(text or "", content_type)
-        if len(cleaned) >= MIN_TEXT_LENGTH:
-            return cleaned
-        LOGGER.debug("Skipped short Riksdagen text URL for dok_id=%s url=%s length=%s", dok_id, url, len(cleaned))
-
-    if dok_id:
-        txt_url = f"{RIKSDAG_DOCUMENT_URL}/{dok_id}.txt"
-        attempted.append(txt_url)
-        text, error, content_type = _fetch_url_text(session, txt_url)
-        if not error:
+    speech_url_groups = [
+        ("anforande_url_xml", _urls_from_record(record, ("anforande_url_xml",))),
+        ("anforande_url_html", _urls_from_record(record, ("anforande_url_html",))),
+    ]
+    for source, urls in speech_url_groups:
+        for url in urls:
+            attempted.append(url)
+            text, error, content_type = _fetch_url_text(session, url)
+            if error:
+                LOGGER.debug("Could not fetch Riksdagen %s for dok_id=%s url=%s: %s", source, dok_id, url, error)
+                continue
             cleaned = _response_text_to_document_text(text or "", content_type)
             if len(cleaned) >= MIN_TEXT_LENGTH:
-                return cleaned
-            LOGGER.debug("Skipped short Riksdagen txt document for dok_id=%s length=%s", dok_id, len(cleaned))
-        else:
-            LOGGER.debug("Could not fetch Riksdagen txt document for dok_id=%s: %s", dok_id, error)
+                return cleaned, source
+            LOGGER.debug("Skipped short Riksdagen %s for dok_id=%s url=%s length=%s", source, dok_id, url, len(cleaned))
 
-        html_url = f"{RIKSDAG_DOCUMENT_URL}/{dok_id}.html"
-        attempted.append(html_url)
-        html_text, error, content_type = _fetch_url_text(session, html_url)
-        if not error:
-            cleaned = _response_text_to_document_text(html_text or "", content_type)
+    if dok_id:
+        document_urls = _urls_from_record(record, ("dokument_url_text", "dokument_url_txt", "text_url", "url_text"))
+        document_urls.append(f"{RIKSDAG_DOCUMENT_URL}/{dok_id}.txt")
+        document_urls.append(f"{RIKSDAG_DOCUMENT_URL}/{dok_id}.html")
+        for url in list(dict.fromkeys(document_urls)):
+            attempted.append(url)
+            text, error, content_type = _fetch_url_text(session, url)
+            if error:
+                LOGGER.debug("Could not fetch Riksdagen document fallback for dok_id=%s url=%s: %s", dok_id, url, error)
+                continue
+            cleaned = _response_text_to_document_text(text or "", content_type)
             if len(cleaned) >= MIN_TEXT_LENGTH:
-                return cleaned
-            LOGGER.debug("Skipped short Riksdagen html document for dok_id=%s length=%s", dok_id, len(cleaned))
-        else:
-            LOGGER.debug("Could not fetch Riksdagen html document for dok_id=%s: %s", dok_id, error)
+                return cleaned, "document_fallback"
+            LOGGER.debug("Skipped short Riksdagen document fallback for dok_id=%s url=%s length=%s", dok_id, url, len(cleaned))
 
     LOGGER.warning(
         "Skipping Riksdagen record without fulltext: dok_id=%s title=%r url=%s attempted=%s",
@@ -233,7 +227,19 @@ def fetch_document_text(record: dict[str, Any], session: requests.Session) -> st
         extract_document_url(record),
         attempted,
     )
-    return None
+    return None, "missing_or_short_text"
+
+
+def fetch_document_text(record: dict[str, Any], session: requests.Session) -> str | None:
+    text, _source = _fetch_document_text_with_source(record, session)
+    return text
+
+
+def _text_snippet(text: str, max_length: int = 120) -> str:
+    snippet = " ".join((text or "").split())
+    if len(snippet) <= max_length:
+        return snippet
+    return snippet[: max_length - 3].rstrip() + "..."
 
 
 def _fetch_riksdag_payload(
@@ -261,16 +267,17 @@ def fetch_riksdag_records(
     session = session or _new_session()
     payload = _fetch_riksdag_payload(party_id=party_id, riksmote=riksmote, session=session)
     records = normalize_riksdag_records(payload)
-    LOGGER.info("Riksdagen records found: %s", len(records))
+    LOGGER.info("Riksdagen API records returned: %s", len(records))
     if records:
         LOGGER.info("Riksdagen first record keys: %s", sorted(records[0]))
+    LOGGER.info("Riksdagen records selected after limit=%s: %s", limit, min(len(records), limit))
     return records[:limit]
 
 
 def _stable_record_id(record: dict[str, Any]) -> str:
-    dok_id = extract_dok_id(record)
-    if dok_id:
-        return dok_id
+    anforande_id = extract_anforande_id(record)
+    if anforande_id:
+        return anforande_id
     return hashlib.sha256(json.dumps(record, sort_keys=True, ensure_ascii=False).encode("utf-8")).hexdigest()[:16]
 
 
@@ -282,11 +289,14 @@ def _document_from_record(
 ) -> dict[str, Any]:
     record_id = _stable_record_id(record)
     dok_id = extract_dok_id(record)
+    anforande_id = extract_anforande_id(record)
     party = extract_party(record) or party_id
-    url = extract_document_url(record) or (f"{RIKSDAG_DOCUMENT_URL}/{dok_id}.html" if dok_id else "https://data.riksdagen.se/")
+    url = _first_string(record, ("anforande_url_html",)) or extract_document_url(record) or (
+        f"{RIKSDAG_DOCUMENT_URL}/{dok_id}.html" if dok_id else "https://data.riksdagen.se/"
+    )
     fetched_at = datetime.now(timezone.utc).isoformat()
     return {
-        "doc_id": f"riksdag-{record_id}",
+        "doc_id": f"riksdag_speech:{party}:{record_id}",
         "party": party,
         "source_owner": "Sveriges riksdag",
         "source_kind": "riksdag_speech",
@@ -299,16 +309,22 @@ def _document_from_record(
             "official_source": True,
             "source_system": "riksdagen_open_data",
             "dok_id": dok_id,
+            "anforande_id": anforande_id,
+            "anforande_nummer": _first_string(record, ("anforande_nummer",)),
+            "talare": _first_string(record, ("talare",)),
             "dokumenttyp": _first_string(record, ("doktyp", "typ", "dokumenttyp")),
-            "riksmote": _first_string(record, ("rm", "riksmote")) or riksmote,
+            "dok_titel": _first_string(record, ("dok_titel",)),
+            "dok_datum": _first_string(record, ("dok_datum",)),
+            "riksmote": _first_string(record, ("dok_rm", "rm", "riksmote")) or riksmote,
             "parti": party,
         },
     }
 
 
-def _write_jsonl(documents: list[dict[str, Any]], output_path: Path) -> None:
+def _write_jsonl(documents: list[dict[str, Any]], output_path: Path, append: bool = False) -> None:
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    with output_path.open("w", encoding="utf-8") as file:
+    mode = "a" if append else "w"
+    with output_path.open(mode, encoding="utf-8") as file:
         for document in documents:
             file.write(json.dumps(document, ensure_ascii=False) + "\n")
 
@@ -319,8 +335,18 @@ def ingest_riksdag_sources(
     limit: int = 20,
     output_path: Path | str = DEFAULT_OUTPUT_PATH,
     session: requests.Session | None = None,
+    append: bool = False,
 ) -> list[dict[str, Any]]:
     session = session or _new_session()
+    output_mode = "append" if append else "overwrite"
+    LOGGER.info(
+        "Starting Riksdagen import: party=%s riksmote=%s limit=%s output=%s mode=%s",
+        party_id,
+        riksmote,
+        limit,
+        output_path,
+        output_mode,
+    )
     try:
         records = fetch_riksdag_records(party_id=party_id, riksmote=riksmote, limit=limit, session=session)
     except requests.RequestException as exc:
@@ -332,12 +358,41 @@ def ingest_riksdag_sources(
 
     documents: list[dict[str, Any]] = []
     skipped_without_text = 0
+    text_source_counts: Counter[str] = Counter()
     for record in records:
-        text = fetch_document_text(record, session)
+        text, text_source = _fetch_document_text_with_source(record, session)
+        text_source_counts[text_source] += 1
         if not text:
             skipped_without_text += 1
+            LOGGER.debug(
+                "Skipped Riksdagen record: dok_id=%s title=%r reason=missing_or_short_text keys=%s",
+                extract_dok_id(record),
+                extract_title(record),
+                sorted(record),
+            )
             continue
-        documents.append(_document_from_record(record, text, party_id, riksmote))
+        document = _document_from_record(record, text, party_id, riksmote)
+        documents.append(document)
+        if len(document["text"]) > SUSPICIOUS_TEXT_LENGTH:
+            LOGGER.warning(
+                "Suspiciously large Riksdagen speech text; this may be a whole protocol, not one speech: "
+                "dok_id=%s anforande_id=%s chars=%s source=%s",
+                document["metadata"].get("dok_id"),
+                document["metadata"].get("anforande_id"),
+                len(document["text"]),
+                text_source,
+            )
+        LOGGER.debug(
+            "Imported Riksdagen record: dok_id=%s anforande_id=%s title=%r party=%s chars=%s source=%s url=%s snippet=%r",
+            document["metadata"].get("dok_id"),
+            document["metadata"].get("anforande_id"),
+            document["title"],
+            document["party"],
+            len(document["text"]),
+            text_source,
+            document["url"],
+            _text_snippet(document["text"]),
+        )
 
     if skipped_without_text:
         LOGGER.warning("Skipped %s Riksdagen records without text", skipped_without_text)
@@ -350,8 +405,43 @@ def ingest_riksdag_sources(
         )
 
     path = Path(output_path)
-    _write_jsonl(documents, path)
-    LOGGER.info("Wrote %s Riksdagen documents to %s", len(documents), path)
+    _write_jsonl(documents, path, append=append)
+    stats = text_stats(document["text"] for document in documents)
+    LOGGER.info(
+        "Riksdagen import summary: party=%s riksmote=%s limit=%s records=%s imported=%s skipped=%s "
+        "skipped_missing_or_short_text=%s output=%s mode=%s",
+        party_id,
+        riksmote,
+        limit,
+        len(records),
+        len(documents),
+        len(records) - len(documents),
+        skipped_without_text,
+        path,
+        output_mode,
+    )
+    LOGGER.info(
+        "Riksdagen text source counts for party=%s: inline_anforandetext=%s anforande_url_xml=%s "
+        "anforande_url_html=%s document_fallback=%s missing_or_short_text=%s",
+        party_id,
+        text_source_counts["inline_anforandetext"],
+        text_source_counts["anforande_url_xml"],
+        text_source_counts["anforande_url_html"],
+        text_source_counts["document_fallback"],
+        text_source_counts["missing_or_short_text"],
+    )
+    LOGGER.info(
+        "Riksdagen text stats for party=%s: documents=%s chars_total=%s chars_min=%s "
+        "chars_median=%s chars_max=%s words_total=%s",
+        party_id,
+        stats["documents"],
+        stats["chars_total"],
+        stats["chars_min"],
+        stats["chars_median"],
+        stats["chars_max"],
+        stats["words_total"],
+    )
+    LOGGER.info("Wrote %s Riksdagen documents to %s with mode=%s", len(documents), path, output_mode)
     return documents
 
 
@@ -361,10 +451,11 @@ def main() -> None:
     parser.add_argument("--riksmote", default="2025/26")
     parser.add_argument("--limit", type=int, default=20)
     parser.add_argument("--output", type=Path, default=DEFAULT_OUTPUT_PATH)
+    parser.add_argument("--append", action="store_true", help="Append to output JSONL instead of overwriting it.")
     args = parser.parse_args()
 
     logging.basicConfig(level=os.getenv("LOG_LEVEL", "INFO").upper(), format="%(levelname)s %(name)s: %(message)s")
-    ingest_riksdag_sources(args.party, args.riksmote, args.limit, args.output)
+    ingest_riksdag_sources(args.party, args.riksmote, args.limit, args.output, append=args.append)
 
 
 if __name__ == "__main__":

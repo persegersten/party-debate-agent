@@ -5,11 +5,13 @@ import hashlib
 import json
 import logging
 import math
+import os
 from collections import Counter
 from pathlib import Path
 from typing import Any, Iterable
 
 from debate.models import DocumentChunk
+from pipeline_stats import count_by
 
 LOGGER = logging.getLogger(__name__)
 DEFAULT_CHUNKS_PATH = Path("data/processed/chunks.jsonl")
@@ -127,6 +129,8 @@ class LocalVectorStore:
             len(chunks),
             rebuild,
         )
+        LOGGER.info("Index input chunks by source_kind: %s", count_by(chunks, lambda chunk: chunk.source_kind))
+        LOGGER.info("Index input chunks by party: %s", count_by(chunks, lambda chunk: chunk.party))
 
         existing_count = self._record_count()
         if existing_count > 0 and not rebuild:
@@ -193,7 +197,7 @@ class LocalVectorStore:
         return [chunk for _, chunk in scored[:k]]
 
     def _metadata(self, chunk: DocumentChunk) -> dict[str, Any]:
-        metadata = dict(chunk.metadata)
+        metadata = {key: value for key, value in chunk.metadata.items() if value is not None}
         metadata.update(
             {
                 "chunk_id": chunk.chunk_id,
@@ -255,7 +259,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 def main() -> None:
     args = parse_args()
 
-    logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
+    logging.basicConfig(level=os.getenv("LOG_LEVEL", "INFO").upper(), format="%(levelname)s %(name)s: %(message)s")
     try:
         added = build_index(args.chunks, args.index, rebuild=args.rebuild)
     except ExistingIndexError as exc:

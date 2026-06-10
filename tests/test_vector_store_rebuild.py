@@ -109,3 +109,47 @@ def test_cli_main_passes_rebuild_down(monkeypatch, tmp_path) -> None:
     assert calls["chunks_path"] == tmp_path / "chunks.jsonl"
     assert calls["persist_dir"] == tmp_path / "index"
     assert calls["rebuild"] is True
+
+
+def test_read_chunks_handles_mixed_source_kinds_and_missing_metadata(tmp_path) -> None:
+    chunks_path = tmp_path / "chunks.jsonl"
+    chunks = [
+        _chunk("m-policy", "politik", party="M"),
+        DocumentChunk(
+            chunk_id="s-riksdag",
+            doc_id="doc-s-riksdag",
+            party="S",
+            source_kind="riksdag_speech",
+            title="Anförande",
+            url="https://data.riksdagen.se/dokument/H8011",
+            text="anförande",
+            chunk_index=0,
+            metadata={},
+        ),
+    ]
+    _write_chunks(chunks_path, chunks)
+
+    loaded = vector_store.read_chunks(chunks_path)
+
+    assert {chunk.source_kind for chunk in loaded} == {"policy_index", "riksdag_speech"}
+    assert {chunk.party for chunk in loaded} == {"M", "S"}
+
+
+def test_vector_store_metadata_omits_none_values(tmp_path) -> None:
+    store = LocalVectorStore(persist_dir=tmp_path / "index")
+    chunk = DocumentChunk(
+        chunk_id="s-riksdag",
+        doc_id="doc-s-riksdag",
+        party="S",
+        source_kind="riksdag_speech",
+        title="Anförande",
+        url="https://data.riksdagen.se/dokument/H8011",
+        text="anförande",
+        chunk_index=0,
+        metadata={"dok_id": "H8011", "dokumenttyp": None},
+    )
+
+    metadata = store._metadata(chunk)
+
+    assert metadata["dok_id"] == "H8011"
+    assert "dokumenttyp" not in metadata

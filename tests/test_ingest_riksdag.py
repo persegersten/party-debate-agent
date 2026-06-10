@@ -75,6 +75,22 @@ def test_fetch_document_text_uses_substantive_inline_text() -> None:
     assert session.calls == []
 
 
+def test_fetch_document_text_uses_anforandetext_without_document_fetch() -> None:
+    session = FakeSession(
+        {
+            "https://data.riksdagen.se/dokument/H8011.txt": FakeResponse(
+                "https://data.riksdagen.se/dokument/H8011.txt",
+                text="Hela protokollet " * 100,
+                content_type="text/plain",
+            )
+        }
+    )
+    record = {"dok_id": "H8011", "anforande_id": "abc-123", "anforandetext": LONG_TEXT}
+
+    assert ingest_riksdag.fetch_document_text(record, session) == ingest_riksdag.clean_text(LONG_TEXT)
+    assert session.calls == []
+
+
 def test_fetch_document_text_fetches_txt_by_dok_id() -> None:
     session = FakeSession(
         {
@@ -136,6 +152,51 @@ def test_fetch_riksdag_records_requests_speeches_not_replies() -> None:
     assert session.calls == [list_url]
 
 
+def test_fetch_document_text_tries_speech_urls_before_document_fallback() -> None:
+    xml_url = "https://data.riksdagen.se/anforande/H8011-1.xml"
+    session = FakeSession(
+        {
+            xml_url: FakeResponse(
+                xml_url,
+                text=f"<anforande><anforandetext>{LONG_TEXT}</anforandetext></anforande>",
+                content_type="text/xml",
+            ),
+            "https://data.riksdagen.se/dokument/H8011.txt": FakeResponse(
+                "https://data.riksdagen.se/dokument/H8011.txt",
+                text="Hela protokollet " * 100,
+                content_type="text/plain",
+            ),
+        }
+    )
+    record = {"dok_id": "H8011", "anforande_url_xml": xml_url}
+
+    text = ingest_riksdag.fetch_document_text(record, session)
+
+    assert text is not None
+    assert "Detta är fulltext från Riksdagen." in text
+    assert "Hela protokollet" not in text
+    assert session.calls == [xml_url]
+
+
+def test_fetch_document_text_extracts_anforandetext_from_speech_xml() -> None:
+    xml_url = "https://data.riksdagen.se/anforande/H8011-1.xml"
+    xml = (
+        "<anforande>"
+        "<dok_id>H8011</dok_id>"
+        "<talare>Ledamot Test</talare>"
+        f"<anforandetext>&lt;p&gt;{LONG_TEXT}&lt;/p&gt;</anforandetext>"
+        "</anforande>"
+    )
+    session = FakeSession({xml_url: FakeResponse(xml_url, text=xml, content_type="text/xml")})
+
+    text = ingest_riksdag.fetch_document_text({"dok_id": "H8011", "anforande_url_xml": xml_url}, session)
+
+    assert text is not None
+    assert text.startswith("Detta är fulltext från Riksdagen.")
+    assert "Ledamot Test" not in text
+    assert "<p>" not in text
+
+
 def test_fetch_document_text_falls_back_to_html_when_txt_fails() -> None:
     html = f"<html><body><main><h1>Titel</h1><p>{LONG_TEXT}</p></main></body></html>"
     session = FakeSession(
@@ -188,11 +249,17 @@ def test_ingest_riksdag_sources_writes_jsonl_with_fulltext(tmp_path: Path) -> No
                     "dokumentlista": {
                         "dokument": [
                             {
+                                "anforande_id": "anf-1",
+                                "anforande_nummer": "1",
                                 "dok_id": "H8011",
                                 "titel": "Välfärdsdebatt",
+                                "dok_titel": "Protokoll",
+                                "dok_datum": "2026-06-09",
+                                "talare": "Ledamot Test",
                                 "parti": "S",
                                 "doktyp": "prot",
-                                "rm": "2025/26",
+                                "dok_rm": "2025/26",
+                                "anforande_url_html": "https://data.riksdagen.se/anforande/anf-1",
                             }
                         ]
                     }
@@ -212,12 +279,98 @@ def test_ingest_riksdag_sources_writes_jsonl_with_fulltext(tmp_path: Path) -> No
     rows = [json.loads(line) for line in output_path.read_text(encoding="utf-8").splitlines()]
     assert len(rows) == 1
     row = rows[0]
-    assert row["doc_id"] == "riksdag-H8011"
+    assert row["doc_id"] == "riksdag_speech:S:anf-1"
     assert row["source_kind"] == "riksdag_speech"
     assert row["title"] == "Välfärdsdebatt"
+    assert row["url"] == "https://data.riksdagen.se/anforande/anf-1"
     assert "Detta är fulltext från Riksdagen." in row["text"]
     assert len(row["text"]) >= ingest_riksdag.MIN_TEXT_LENGTH
     assert row["metadata"]["dok_id"] == "H8011"
+    assert row["metadata"]["anforande_id"] == "anf-1"
+    assert row["metadata"]["anforande_nummer"] == "1"
+    assert row["metadata"]["talare"] == "Ledamot Test"
+    assert row["metadata"]["dok_titel"] == "Protokoll"
+    assert row["metadata"]["dok_datum"] == "2026-06-09"
     assert row["metadata"]["dokumenttyp"] == "prot"
     assert row["metadata"]["riksmote"] == "2025/26"
     assert row["metadata"]["parti"] == "S"
+
+
+def test_ingest_riksdag_sources_appends_multiple_party_imports(tmp_path: Path) -> None:
+    output_path = tmp_path / "riksdag.jsonl"
+    s_url = "https://data.riksdagen.se/anforandelista/?rm=2025/26&parti=S&anftyp=Nej&utformat=json"
+    m_url = "https://data.riksdagen.se/anforandelista/?rm=2025/26&parti=M&anftyp=Nej&utformat=json"
+    s_session = FakeSession(
+        {
+            s_url: FakeResponse(
+                s_url,
+                json_payload={"anforandelista": {"anforande": {"anforande_id": "s-1", "parti": "S", "anforandetext": LONG_TEXT}}},
+            )
+        }
+    )
+    m_session = FakeSession(
+        {
+            m_url: FakeResponse(
+                m_url,
+                json_payload={"anforandelista": {"anforande": {"anforande_id": "m-1", "parti": "M", "anforandetext": LONG_TEXT}}},
+            )
+        }
+    )
+
+    ingest_riksdag.ingest_riksdag_sources("S", "2025/26", output_path=output_path, session=s_session)
+    ingest_riksdag.ingest_riksdag_sources("M", "2025/26", output_path=output_path, session=m_session, append=True)
+
+    rows = [json.loads(line) for line in output_path.read_text(encoding="utf-8").splitlines()]
+    assert [row["doc_id"] for row in rows] == ["riksdag_speech:S:s-1", "riksdag_speech:M:m-1"]
+
+
+def test_ingest_riksdag_sources_logs_import_summary_and_text_stats(tmp_path: Path, caplog) -> None:
+    list_url = "https://data.riksdagen.se/anforandelista/?rm=2025/26&parti=S&anftyp=Nej&utformat=json"
+    output_path = tmp_path / "riksdag.jsonl"
+    session = FakeSession(
+        {
+            list_url: FakeResponse(
+                list_url,
+                json_payload={
+                    "anforandelista": {
+                        "anforande": [
+                            {"dok_id": "H8011", "titel": "Importerat", "anforandetext": LONG_TEXT},
+                            {"dok_id": "H8012", "titel": "För kort", "anforandetext": "kort"},
+                        ]
+                    }
+                },
+            ),
+        }
+    )
+    caplog.set_level("INFO")
+
+    documents = ingest_riksdag.ingest_riksdag_sources("S", "2025/26", output_path=output_path, session=session)
+
+    assert len(documents) == 1
+    assert "Riksdagen import summary: party=S riksmote=2025/26 limit=20 records=2 imported=1 skipped=1" in caplog.text
+    assert "skipped_missing_or_short_text=1" in caplog.text
+    assert "inline_anforandetext=1" in caplog.text
+    assert "Riksdagen text stats for party=S: documents=1" in caplog.text
+
+
+def test_ingest_riksdag_sources_warns_for_suspiciously_large_fallback_text(tmp_path: Path, caplog) -> None:
+    list_url = "https://data.riksdagen.se/anforandelista/?rm=2025/26&parti=S&anftyp=Nej&utformat=json"
+    large_text = "Hela protokollet " * 4000
+    session = FakeSession(
+        {
+            list_url: FakeResponse(
+                list_url,
+                json_payload={"anforandelista": {"anforande": {"anforande_id": "s-1", "dok_id": "H8011", "parti": "S"}}},
+            ),
+            "https://data.riksdagen.se/dokument/H8011.txt": FakeResponse(
+                "https://data.riksdagen.se/dokument/H8011.txt",
+                text=large_text,
+                content_type="text/plain",
+            ),
+        }
+    )
+    caplog.set_level("WARNING")
+
+    ingest_riksdag.ingest_riksdag_sources("S", "2025/26", output_path=tmp_path / "riksdag.jsonl", session=session)
+
+    assert "Suspiciously large Riksdagen speech text" in caplog.text

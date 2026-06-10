@@ -4,12 +4,15 @@ import argparse
 import hashlib
 import json
 import logging
+import os
 from pathlib import Path
 
 from debate.models import DocumentChunk, RawDocument
+from pipeline_stats import count_by
 
 LOGGER = logging.getLogger(__name__)
 DEFAULT_INPUT_PATH = Path("data/processed/party_sources.jsonl")
+DEFAULT_RIKSDAG_INPUT_PATH = Path("data/processed/riksdag_sources.jsonl")
 DEFAULT_OUTPUT_PATH = Path("data/processed/chunks.jsonl")
 
 
@@ -52,6 +55,9 @@ def chunk_document(document: RawDocument, chunk_size: int = 1200, overlap: int =
 
 def _read_documents(input_path: Path) -> list[RawDocument]:
     documents: list[RawDocument] = []
+    if not input_path.exists():
+        LOGGER.info("Chunk input missing; skipping path=%s", input_path)
+        return documents
     with input_path.open("r", encoding="utf-8") as file:
         for line_number, line in enumerate(file, start=1):
             if not line.strip():
@@ -63,11 +69,23 @@ def _read_documents(input_path: Path) -> list[RawDocument]:
     return documents
 
 
-def chunk_jsonl(input_path: Path | str, output_path: Path | str) -> None:
-    input_file = Path(input_path)
+def _normalize_input_paths(input_path: Path | str | list[Path | str]) -> list[Path]:
+    if isinstance(input_path, list):
+        return [Path(path) for path in input_path]
+    return [Path(input_path)]
+
+
+def chunk_jsonl(input_path: Path | str | list[Path | str], output_path: Path | str) -> None:
+    input_files = _normalize_input_paths(input_path)
     output_file = Path(output_path)
-    documents = _read_documents(input_file)
+    documents = [document for input_file in input_files for document in _read_documents(input_file)]
     chunks = [chunk for document in documents for chunk in chunk_document(document)]
+
+    LOGGER.info("Chunking input paths: %s", [str(path) for path in input_files])
+    LOGGER.info("Loaded raw documents by source_kind: %s", count_by(documents, lambda document: document.source_kind))
+    LOGGER.info("Loaded raw documents by party: %s", count_by(documents, lambda document: document.party))
+    LOGGER.info("Created chunks by source_kind: %s", count_by(chunks, lambda chunk: chunk.source_kind))
+    LOGGER.info("Created chunks by party: %s", count_by(chunks, lambda chunk: chunk.party))
 
     output_file.parent.mkdir(parents=True, exist_ok=True)
     with output_file.open("w", encoding="utf-8") as file:
@@ -80,12 +98,18 @@ def chunk_jsonl(input_path: Path | str, output_path: Path | str) -> None:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Chunk processed JSONL documents.")
-    parser.add_argument("--input", type=Path, default=DEFAULT_INPUT_PATH)
+    parser.add_argument(
+        "--input",
+        type=Path,
+        action="append",
+        help="Input JSONL path. Can be provided multiple times. Defaults to party and Riksdagen processed files.",
+    )
     parser.add_argument("--output", type=Path, default=DEFAULT_OUTPUT_PATH)
     args = parser.parse_args()
 
-    logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
-    chunk_jsonl(args.input, args.output)
+    logging.basicConfig(level=os.getenv("LOG_LEVEL", "INFO").upper(), format="%(levelname)s %(name)s: %(message)s")
+    input_paths = args.input or [DEFAULT_INPUT_PATH, DEFAULT_RIKSDAG_INPUT_PATH]
+    chunk_jsonl(input_paths, args.output)
 
 
 if __name__ == "__main__":
