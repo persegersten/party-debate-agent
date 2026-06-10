@@ -16,16 +16,19 @@ def build_party_agents(config: ProjectConfig) -> dict[str, PartyAgent]:
 def _moderator_summary(state: DebateState) -> str:
     opening_parties = ", ".join(response.party for response in state.responses) or "inga partier"
     rebuttal_parties = ", ".join(response.party for response in state.rebuttals) or "inga partier"
+    topic_note = "" if state.topic == "frågan" else f" Ämnet angavs som {state.topic}."
     if len(state.responses) <= 1:
         return (
-            f"Moderator: Debatten om {state.topic} hade öppningssvar från {opening_parties} "
+            f'Moderator: I debatten om frågan "{state.question}" hade vi öppningssvar från {opening_parties} '
             f"och replik från {rebuttal_parties}. Med bara ett aktivt parti framgår främst partiets egen linje."
+            f"{topic_note}"
         )
 
     return (
-        f"Moderator: Debatten om {state.topic} visar både gemensamma prioriteringar och skillnader mellan "
+        f'Moderator: I debatten om frågan "{state.question}" syns både gemensamma prioriteringar och skillnader mellan '
         f"{opening_parties}. Öppningsrundan gav partiernas huvudlinjer, och replikrundan från {rebuttal_parties} "
         "förtydligade var partierna håller fast vid sina egna förslag eller markerar skillnader mot andra svar."
+        f"{topic_note}"
     )
 
 

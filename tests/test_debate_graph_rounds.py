@@ -52,3 +52,55 @@ def test_debate_graph_runs_opening_rebuttal_and_summary(monkeypatch) -> None:
         "reply:S:Vad vill ni göra?:S,M",
         "reply:M:Vad vill ni göra?:S,M",
     ]
+
+
+def test_moderator_summary_uses_question_when_topic_is_neutral(monkeypatch) -> None:
+    calls: list[str] = []
+    config = ProjectConfig(
+        parties=[
+            PartyConfig(id="M", name="Moderaterna", display_name="Moderaterna"),
+            PartyConfig(id="S", name="Socialdemokraterna", display_name="Socialdemokraterna"),
+        ],
+        sources=[],
+    )
+
+    def fake_build_party_agents(config: ProjectConfig) -> dict[str, FakePartyAgent]:
+        return {party.id: FakePartyAgent(party.id, calls) for party in config.parties}
+
+    monkeypatch.setattr(debate_graph, "build_party_agents", fake_build_party_agents)
+    compiled_graph = debate_graph.build_debate_graph(config)
+
+    result = compiled_graph.invoke(
+        DebateState(topic="frågan", question="Vad vill ni göra åt välfärden?", active_parties=["M", "S"])
+    )
+
+    state = DebateState.model_validate(result)
+    assert state.summary
+    assert "klimat" not in state.summary.lower()
+    assert 'frågan "Vad vill ni göra åt välfärden?"' in state.summary
+
+
+def test_moderator_summary_can_include_explicit_topic(monkeypatch) -> None:
+    calls: list[str] = []
+    config = ProjectConfig(
+        parties=[
+            PartyConfig(id="M", name="Moderaterna", display_name="Moderaterna"),
+            PartyConfig(id="S", name="Socialdemokraterna", display_name="Socialdemokraterna"),
+        ],
+        sources=[],
+    )
+
+    def fake_build_party_agents(config: ProjectConfig) -> dict[str, FakePartyAgent]:
+        return {party.id: FakePartyAgent(party.id, calls) for party in config.parties}
+
+    monkeypatch.setattr(debate_graph, "build_party_agents", fake_build_party_agents)
+    compiled_graph = debate_graph.build_debate_graph(config)
+
+    result = compiled_graph.invoke(
+        DebateState(topic="välfärd", question="Vad vill ni göra åt välfärden?", active_parties=["M", "S"])
+    )
+
+    state = DebateState.model_validate(result)
+    assert state.summary
+    assert 'frågan "Vad vill ni göra åt välfärden?"' in state.summary
+    assert "Ämnet angavs som välfärd." in state.summary

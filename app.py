@@ -11,7 +11,7 @@ from debate.models import DebateState, load_project_config
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Svensk partiledardebatt-simulator")
     parser.add_argument("question", nargs="?", default="Vad vill ni göra åt klimatet?")
-    parser.add_argument("--topic", default="klimat")
+    parser.add_argument("--topic", default=None)
     parser.add_argument("--party", action="append", dest="parties", help="Parti-id att inkludera, kan anges flera gånger.")
     return parser.parse_args()
 
@@ -31,7 +31,9 @@ def main() -> None:
         raise SystemExit(f"Okända partier: {', '.join(unknown)}")
 
     graph = build_debate_graph(config)
-    state = DebateState(topic=args.topic, question=args.question, active_parties=active_parties)
+    topic = args.topic or "frågan"
+    logging.getLogger(__name__).info("Resolved debate question=%r topic=%r", args.question, topic)
+    state = DebateState(topic=topic, question=args.question, active_parties=active_parties)
     result = graph.invoke(state)
     responses = result.responses if isinstance(result, DebateState) else result["responses"]
     rebuttals = result.rebuttals if isinstance(result, DebateState) else result["rebuttals"]
