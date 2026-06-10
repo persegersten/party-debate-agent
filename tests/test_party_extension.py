@@ -37,3 +37,32 @@ sources:
 
     assert "C" in agents
     assert agents["C"].party.display_name == "Centerpartiet"
+
+
+def test_built_party_agents_share_llm_client(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setenv("DISABLE_LLM", "true")
+    config_dir = tmp_path / "config"
+    config_dir.mkdir()
+    (config_dir / "parties.yaml").write_text(
+        """
+parties:
+  - id: S
+    name: Socialdemokraterna
+    display_name: Socialdemokraterna
+  - id: M
+    name: Moderaterna
+    display_name: Moderaterna
+""",
+        encoding="utf-8",
+    )
+    (config_dir / "sources.yaml").write_text(
+        """
+sources: []
+""",
+        encoding="utf-8",
+    )
+
+    config = load_project_config(config_dir)
+    agents = build_party_agents(config)
+
+    assert agents["S"].llm_client is agents["M"].llm_client

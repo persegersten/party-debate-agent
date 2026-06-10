@@ -2,13 +2,15 @@ from __future__ import annotations
 
 from collections.abc import Callable
 
+from agents.llm_client import OpenAIPartyAnswerClient
 from agents.party_agent import PartyAgent
 from debate.models import DebateState, ProjectConfig, load_project_config
 
 
 def build_party_agents(config: ProjectConfig) -> dict[str, PartyAgent]:
     """Create one party agent per config entry without hardcoded party logic."""
-    return {party.id: PartyAgent(party=party) for party in config.parties}
+    llm_client = OpenAIPartyAnswerClient()
+    return {party.id: PartyAgent(party=party, llm_client=llm_client) for party in config.parties}
 
 
 def build_debate_graph(config: ProjectConfig | None = None) -> Callable:

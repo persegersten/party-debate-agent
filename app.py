@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import argparse
+import logging
+import os
 
 from debate.graph import build_debate_graph
 from debate.models import DebateState, load_project_config
@@ -15,6 +17,11 @@ def parse_args() -> argparse.Namespace:
 
 
 def main() -> None:
+    logging.basicConfig(
+        level=os.getenv("LOG_LEVEL", "INFO").upper(),
+        format="%(levelname)s:%(name)s:%(message)s",
+    )
+    logging.getLogger("openai").setLevel(logging.WARNING)
     args = parse_args()
     config = load_project_config()
     known_parties = config.party_by_id()
