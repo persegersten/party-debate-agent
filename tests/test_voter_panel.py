@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import re
+
 from agents.voter_panel import DEFAULT_PERSONAS, SIMULATION_DISCLAIMER, VoterPanel, score_response
 from debate.models import DebateState, Evidence, PartyResponse, VoterPersona
 
@@ -18,6 +20,10 @@ def response(party: str, answer: str, with_evidence: bool = True) -> PartyRespon
         answer=answer,
         evidence=[evidence()] if with_evidence else [],
     )
+
+
+def _sentence_count(text: str) -> int:
+    return len([part for part in re.split(r"[.!?]+", text) if part.strip()])
 
 
 def test_default_personas_are_exactly_five_with_expected_priorities() -> None:
@@ -50,6 +56,7 @@ def test_priority_matching_affects_choice() -> None:
     reactions = panel.evaluate(state)
 
     assert reactions[0].party == "MP"
+    assert "klimat" in reactions[0].reaction.lower()
 
 
 def test_evidence_improves_score_and_missing_evidence_penalizes() -> None:
@@ -75,7 +82,7 @@ def test_every_persona_selects_active_party() -> None:
         question="Vad vill ni göra?",
         active_parties=["M", "S"],
         responses=[
-            response("M", "Trygghet, ekonomi och regler är våra prioriteringar i svaret."),
+            response("M", "Trygghet, ekonomi, regler och klimat är våra prioriteringar i svaret."),
             response("S", "Välfärd, vård, pensioner och arbetsvillkor är våra prioriteringar."),
         ],
     )
@@ -85,6 +92,10 @@ def test_every_persona_selects_active_party() -> None:
     assert len(reactions) == 5
     assert {reaction.party for reaction in reactions} <= {"M", "S"}
     assert all(reaction.reaction for reaction in reactions)
+    assert all(_sentence_count(reaction.reaction) >= 2 for reaction in reactions)
+    assert all(reaction.party in reaction.reaction for reaction in reactions)
+    assert any("klimat" in reaction.reaction.lower() for reaction in reactions)
+    assert any("välfärd" in reaction.reaction.lower() for reaction in reactions)
 
 
 def test_simulation_disclaimer_text() -> None:

@@ -127,16 +127,34 @@ def _response_by_party(responses: list[PartyResponse]) -> dict[str, PartyRespons
     return by_party
 
 
+def _persona_role(persona: VoterPersona) -> str:
+    return {
+        "Pensionären": "pensionär",
+        "Studenten": "student",
+        "Småföretagaren": "småföretagare",
+        "Offentliganställda": "offentliganställd",
+        "Förstagångsväljaren": "förstagångsväljare",
+    }.get(persona.name, persona.name.lower())
+
+
 def _reaction_text(persona: VoterPersona, score: ResponseScore, response: PartyResponse) -> str:
-    matched = score.priority_matches
-    evidence = "starkt källstöd" if score.evidence_score >= 2 else "svagare källstöd"
-    clarity = "tydligt" if score.clarity_score >= 2 else "mindre tydligt"
-    evasive = " Svaret kändes delvis undvikande." if score.evasiveness_penalty else ""
-    return (
-        f"{persona.name} väljer {response.party} eftersom svaret matchade {matched} av personans "
-        f"prioriteringar ({', '.join(persona.priorities)}), hade {evidence} och var {clarity}."
-        f"{evasive}"
+    matched_priorities = [priority for priority in persona.priorities if priority.lower() in _combined_text(response)]
+    matched_text = ", ".join(matched_priorities) if matched_priorities else "inga av personans prioriteringar"
+    evidence_text = "starkt källstöd" if score.evidence_score >= 2 else "svagare källstöd"
+    clarity_text = "tydligt" if score.clarity_score >= 2 else "mindre tydligt"
+    evasive_clause = (
+        "de andra svaren kändes svagare eller mer undvikande, så det här valet gav mest förtroende"
+        if score.evasiveness_penalty or score.priority_matches == 0
+        else f"de andra svaren matchade sämre mot {persona.name.lower()}s prioriteringar"
     )
+    first_sentence = (
+        f"Jag väljer {response.party} eftersom svaret tydligast träffade {matched_text} "
+        f"och kändes {clarity_text} i förhållande till mina prioriteringar som {_persona_role(persona)}."
+    )
+    second_sentence = (
+        f"Det fanns {evidence_text}, och {evasive_clause}, vilket gjorde att {response.party} passade bäst för mig."
+    )
+    return f"{first_sentence} {second_sentence}"
 
 
 class VoterPanel:
