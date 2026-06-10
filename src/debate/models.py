@@ -97,6 +97,7 @@ class DebateState(BaseModel):
     question: str
     active_parties: list[str] = Field(default_factory=list)
     responses: list[PartyResponse] = Field(default_factory=list)
+    rebuttals: list[PartyResponse] = Field(default_factory=list)
     fact_checks: list[FactCheckResult] = Field(default_factory=list)
     voter_reactions: list[VoterReaction] = Field(default_factory=list)
     summary: str | None = None

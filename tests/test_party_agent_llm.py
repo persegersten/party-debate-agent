@@ -4,7 +4,7 @@ import logging
 
 from agents.llm_client import DEFAULT_OPENAI_MODEL, OpenAIPartyAnswerClient
 from agents.party_agent import PartyAgent
-from debate.models import DocumentChunk, PartyConfig
+from debate.models import DocumentChunk, PartyConfig, PartyResponse
 
 
 class FakeRetriever:
@@ -29,6 +29,26 @@ class FakeLLMClient:
                 "party_name": party_name,
                 "question": question,
                 "evidence_context": evidence_context,
+            }
+        )
+        if self.raises:
+            raise RuntimeError("LLM failed")
+        return self.answer
+
+    def generate_party_rebuttal(
+        self,
+        *,
+        party_name: str,
+        question: str,
+        evidence_context: str,
+        previous_responses_context: str,
+    ) -> str | None:
+        self.calls.append(
+            {
+                "party_name": party_name,
+                "question": question,
+                "evidence_context": evidence_context,
+                "previous_responses_context": previous_responses_context,
             }
         )
         if self.raises:
@@ -147,6 +167,44 @@ def test_evidence_and_claims_are_populated_from_chunks() -> None:
     assert response.evidence[0].relevance == 1.0
     assert len(response.claims) == 1
     assert response.claims[0].topic == "Vad vill ni göra åt klimatet?"
+    assert response.claims[0].evidence == response.evidence
+
+
+def test_reply_uses_own_evidence_and_previous_responses() -> None:
+    llm = FakeLLMClient(answer="Vi står fast vid vår linje och bemöter bara det som sagts.")
+    previous = [
+        PartyResponse(party="M", answer="Moderaterna vill sänka skatten."),
+        PartyResponse(party="S", answer="Socialdemokraterna vill investera i klimatomställning."),
+    ]
+    agent = PartyAgent(party=party(), retriever=FakeRetriever([chunk()]), llm_client=llm)
+
+    response = agent.reply("Vad vill ni göra åt klimatet?", previous)
+
+    assert response.answer == "Vi står fast vid vår linje och bemöter bara det som sagts."
+    assert response.claims[0].evidence == response.evidence
+    assert llm.calls == [
+        {
+            "party_name": "Socialdemokraterna",
+            "question": "Vad vill ni göra åt klimatet?",
+            "evidence_context": (
+                "1. Socialdemokraternas klimatpolitik: "
+                "Vi vill minska utsläppen och investera i klimatomställning."
+            ),
+            "previous_responses_context": (
+                "M: Moderaterna vill sänka skatten.\n"
+                "S: Socialdemokraterna vill investera i klimatomställning."
+            ),
+        }
+    ]
+
+
+def test_reply_falls_back_when_llm_disabled_style_client_returns_none() -> None:
+    agent = PartyAgent(party=party(), retriever=FakeRetriever([chunk()]), llm_client=FakeLLMClient(answer=None))
+
+    response = agent.reply("Vad vill ni göra åt klimatet?", [])
+
+    assert response.answer.startswith("Socialdemokraterna: I replik")
+    assert response.evidence[0].source_title == "Socialdemokraternas klimatpolitik"
     assert response.claims[0].evidence == response.evidence
 
 

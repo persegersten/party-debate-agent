@@ -14,6 +14,16 @@ class PartyAnswerLLM(Protocol):
     def generate_party_answer(self, *, party_name: str, question: str, evidence_context: str) -> str | None:
         """Generate a grounded party answer, or return None when LLM is unavailable."""
 
+    def generate_party_rebuttal(
+        self,
+        *,
+        party_name: str,
+        question: str,
+        evidence_context: str,
+        previous_responses_context: str,
+    ) -> str | None:
+        """Generate a grounded rebuttal, or return None when LLM is unavailable."""
+
 
 def _env_flag_enabled(raw_value: str | None) -> bool:
     return (raw_value or "").strip().lower() in {"1", "true", "yes", "on"}
@@ -53,7 +63,7 @@ class OpenAIPartyAnswerClient:
             LOGGER.info("OPENAI_MODEL is not set; using default OpenAI model: %s", self.model)
         LOGGER.info("LLM enabled; using OpenAI model: %s", self.model)
 
-    def generate_party_answer(self, *, party_name: str, question: str, evidence_context: str) -> str | None:
+    def _generate(self, messages: list[dict[str, str]]) -> str | None:
         if self.disable_llm:
             return None
         if not self.api_key:
@@ -65,28 +75,7 @@ class OpenAIPartyAnswerClient:
             client = OpenAI(api_key=self.api_key)
             response = client.chat.completions.create(
                 model=self.model,
-                messages=[
-                    {
-                        "role": "system",
-                        "content": (
-                            f"Du svarar som {party_name}, ett svenskt politiskt parti. "
-                            "Använd endast givna officiella källutdrag. "
-                            "Hitta inte på politik som inte stöds av källorna. "
-                            "Om stödet är svagt, säg det. "
-                            "Svara på svenska med 4-8 meningar. "
-                            "Ange inga fejkade källhänvisningar."
-                        ),
-                    },
-                    {
-                        "role": "user",
-                        "content": (
-                            f"Fråga: {question}\n\n"
-                            "Officiella källutdrag:\n"
-                            f"{evidence_context}\n\n"
-                            "Svara kort och sakligt som partiet."
-                        ),
-                    },
-                ],
+                messages=messages,
                 temperature=0.2,
             )
             answer = response.choices[0].message.content
@@ -94,3 +83,65 @@ class OpenAIPartyAnswerClient:
         except Exception as exc:  # pragma: no cover - exact SDK/network failures vary.
             LOGGER.warning("LLM answer generation failed; using deterministic fallback: %s", format_llm_error(exc))
             return None
+
+    def generate_party_answer(self, *, party_name: str, question: str, evidence_context: str) -> str | None:
+        return self._generate(
+            [
+                {
+                    "role": "system",
+                    "content": (
+                        f"Du svarar som {party_name}, ett svenskt politiskt parti. "
+                        "Använd endast givna officiella källutdrag. "
+                        "Hitta inte på politik som inte stöds av källorna. "
+                        "Om stödet är svagt, säg det. "
+                        "Svara på svenska med 4-8 meningar. "
+                        "Ange inga fejkade källhänvisningar."
+                    ),
+                },
+                {
+                    "role": "user",
+                    "content": (
+                        f"Fråga: {question}\n\n"
+                        "Officiella källutdrag:\n"
+                        f"{evidence_context}\n\n"
+                        "Svara kort och sakligt som partiet."
+                    ),
+                },
+            ]
+        )
+
+    def generate_party_rebuttal(
+        self,
+        *,
+        party_name: str,
+        question: str,
+        evidence_context: str,
+        previous_responses_context: str,
+    ) -> str | None:
+        return self._generate(
+            [
+                {
+                    "role": "system",
+                    "content": (
+                        f"Du replikerar som {party_name}, ett svenskt politiskt parti. "
+                        "Använd endast partiets egna officiella källutdrag för påståenden om partiets politik. "
+                        "Hitta inte på politik som inte stöds av de egna källorna. "
+                        "Du får hänvisa till motståndares svar endast utifrån vad de faktiskt sade i föregående svar. "
+                        "Om stödet är svagt, säg det. "
+                        "Svara på svenska med 3-6 meningar. "
+                        "Ange inga fejkade källhänvisningar."
+                    ),
+                },
+                {
+                    "role": "user",
+                    "content": (
+                        f"Debattfråga: {question}\n\n"
+                        "Partiets egna officiella källutdrag:\n"
+                        f"{evidence_context}\n\n"
+                        "Tidigare partisvar:\n"
+                        f"{previous_responses_context}\n\n"
+                        "Skriv en kort replik."
+                    ),
+                },
+            ]
+        )

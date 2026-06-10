@@ -49,6 +49,27 @@ def _fallback_answer(party_name: str, question: str, evidence: list[Evidence]) -
     )
 
 
+def _fallback_rebuttal(party_name: str, question: str, evidence: list[Evidence]) -> str:
+    if not evidence:
+        return (
+            f"{party_name}: Jag behöver indexerade officiella källor "
+            "innan jag kan ge en källbelagd replik."
+        )
+
+    first = evidence[0]
+    return (
+        f"{party_name}: I replik på frågan '{question}' håller vi oss till det som stöds av våra egna "
+        f"officiella källor, särskilt {first.source_title}. {first.quote}"
+    )
+
+
+def _previous_responses_context(previous_responses: list[PartyResponse]) -> str:
+    lines = []
+    for response in previous_responses:
+        lines.append(f"{response.party}: {_snippet(response.answer, max_length=900)}")
+    return "\n".join(lines) if lines else "Inga tidigare partisvar."
+
+
 class PartyAgent:
     def __init__(
         self,
@@ -88,6 +109,33 @@ class PartyAgent:
             answer = None
         if not answer:
             answer = _fallback_answer(self.party.display_name, question, evidence)
+
+        claim = Claim(text=answer, topic=question, evidence=evidence)
+        return PartyResponse(party=self.party.id, answer=answer, claims=[claim], evidence=evidence)
+
+    def reply(self, question: str, previous_responses: list[PartyResponse]) -> PartyResponse:
+        chunks = self.retriever.retrieve(question, party=self.party.id)
+        if not chunks:
+            return PartyResponse(
+                party=self.party.id,
+                answer=_fallback_rebuttal(self.party.display_name, question, evidence=[]),
+                claims=[],
+                evidence=[],
+            )
+
+        evidence = _evidence_from_chunks(chunks)
+        try:
+            answer = self.llm_client.generate_party_rebuttal(
+                party_name=self.party.display_name,
+                question=question,
+                evidence_context=_evidence_context(chunks),
+                previous_responses_context=_previous_responses_context(previous_responses),
+            )
+        except Exception as exc:
+            LOGGER.warning("LLM rebuttal generation failed; using deterministic fallback: %s", format_llm_error(exc))
+            answer = None
+        if not answer:
+            answer = _fallback_rebuttal(self.party.display_name, question, evidence)
 
         claim = Claim(text=answer, topic=question, evidence=evidence)
         return PartyResponse(party=self.party.id, answer=answer, claims=[claim], evidence=evidence)
