@@ -16,6 +16,10 @@ DEFAULT_CHUNKS_PATH = Path("data/processed/chunks.jsonl")
 DEFAULT_INDEX_DIR = Path("data/index")
 
 
+class ExistingIndexError(RuntimeError):
+    """Raised when an index build would append to an existing persistent index."""
+
+
 class HashEmbeddingFunction:
     """Small local embedding function for demos; avoids external model downloads."""
 
@@ -73,6 +77,7 @@ class LocalVectorStore:
         self.collection_name = collection_name
         self.embedding_function = HashEmbeddingFunction()
         self._fallback_chunks: list[DocumentChunk] = []
+        self._client = None
         self._collection = None
         self._init_chroma()
 
@@ -84,8 +89,8 @@ class LocalVectorStore:
             return
 
         self.persist_dir.mkdir(parents=True, exist_ok=True)
-        client = chromadb.PersistentClient(path=str(self.persist_dir))
-        self._collection = client.get_or_create_collection(
+        self._client = chromadb.PersistentClient(path=str(self.persist_dir))
+        self._collection = self._client.get_or_create_collection(
             name=self.collection_name,
             embedding_function=self.embedding_function,
             metadata={"description": "Official Swedish party sources"},
@@ -113,12 +118,57 @@ class LocalVectorStore:
         LOGGER.info("Added %s chunks to Chroma index at %s", len(new_chunks), self.persist_dir)
         return len(new_chunks)
 
-    def build_from_jsonl(self, chunks_path: Path | str = DEFAULT_CHUNKS_PATH) -> int:
+    def build_from_jsonl(self, chunks_path: Path | str = DEFAULT_CHUNKS_PATH, rebuild: bool = False) -> int:
         chunks = read_chunks(chunks_path)
-        if self._collection is not None and self._collection.count() > 0:
-            LOGGER.info("Reusing existing Chroma index at %s with %s records", self.persist_dir, self._collection.count())
-            return 0
-        return self.add_chunks(chunks)
+        LOGGER.info(
+            "Building Chroma index from %s into %s; chunks=%s rebuild=%s",
+            chunks_path,
+            self.persist_dir,
+            len(chunks),
+            rebuild,
+        )
+
+        existing_count = self._record_count()
+        if existing_count > 0 and not rebuild:
+            raise ExistingIndexError(
+                f"Index at {self.persist_dir} already contains existing records. "
+                "Refusing to append because this can create stale retrieval results. "
+                "Re-run the index build with --rebuild to clear and rebuild the index from the current chunks.jsonl."
+            )
+
+        if rebuild:
+            LOGGER.info("Rebuilding Chroma index at %s; clearing %s existing records", self.persist_dir, existing_count)
+            self._clear_index()
+
+        written = self.add_chunks(chunks)
+        LOGGER.info(
+            "Index build complete for %s; vectors_written=%s final_records=%s rebuild=%s",
+            self.persist_dir,
+            written,
+            self._record_count(),
+            rebuild,
+        )
+        return written
+
+    def _record_count(self) -> int:
+        if self._collection is None:
+            return len(self._fallback_chunks)
+        return self._collection.count()
+
+    def _clear_index(self) -> None:
+        if self._collection is None:
+            self._fallback_chunks.clear()
+            return
+        if self._client is None:
+            self._init_chroma()
+        if self._client is None:
+            raise RuntimeError("Could not initialize Chroma client for index rebuild")
+        self._client.delete_collection(self.collection_name)
+        self._collection = self._client.get_or_create_collection(
+            name=self.collection_name,
+            embedding_function=self.embedding_function,
+            metadata={"description": "Official Swedish party sources"},
+        )
 
     def search(self, query: str, party: str | None = None, k: int = 5) -> list[DocumentChunk]:
         if k <= 0:
@@ -184,19 +234,32 @@ class LocalVectorStore:
 def build_index(
     chunks_path: Path | str = DEFAULT_CHUNKS_PATH,
     persist_dir: Path | str = DEFAULT_INDEX_DIR,
+    rebuild: bool = False,
 ) -> int:
     store = LocalVectorStore(persist_dir=persist_dir)
-    return store.build_from_jsonl(chunks_path)
+    return store.build_from_jsonl(chunks_path, rebuild=rebuild)
+
+
+def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="Build the local Chroma vector index.")
+    parser.add_argument("--chunks", type=Path, default=DEFAULT_CHUNKS_PATH)
+    parser.add_argument("--index", type=Path, default=DEFAULT_INDEX_DIR)
+    parser.add_argument(
+        "--rebuild",
+        action="store_true",
+        help="Clear any existing index records before building from the current chunks JSONL.",
+    )
+    return parser.parse_args(argv)
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Build or reuse the local Chroma vector index.")
-    parser.add_argument("--chunks", type=Path, default=DEFAULT_CHUNKS_PATH)
-    parser.add_argument("--index", type=Path, default=DEFAULT_INDEX_DIR)
-    args = parser.parse_args()
+    args = parse_args()
 
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
-    added = build_index(args.chunks, args.index)
+    try:
+        added = build_index(args.chunks, args.index, rebuild=args.rebuild)
+    except ExistingIndexError as exc:
+        raise SystemExit(str(exc)) from exc
     LOGGER.info("Index build complete; added %s new chunks", added)
 
 

@@ -33,10 +33,12 @@ Pipeline för lokala partikällor:
 ```bash
 python -m src.ingest.ingest_party_sources
 python -m src.ingest.chunking
-python -m src.rag.vector_store
+python -m src.rag.vector_store --rebuild
 ```
 
 Detta läser explicita URL:er från `data/config/sources.yaml`, extraherar text från HTML/PDF, skriver normaliserad JSONL till `data/processed/party_sources.jsonl`, chunkar till `data/processed/chunks.jsonl` och bygger ett lokalt Chroma-index i `data/index`.
+
+Kör indexsteget med `--rebuild` efter ny ingest/chunking. Utan `--rebuild` vägrar indexbyggaren att skriva till ett befintligt icke-tomt index, eftersom append kan ge stale retrieval-resultat.
 
 Riksdagens öppna data är valfritt och ska ses som extra material:
 
