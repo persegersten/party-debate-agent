@@ -10,6 +10,10 @@ Svensk partiledardebatt-simulator där parti-agenter skapas dynamiskt från YAML
 - Låta moderator, parti-agenter, faktagranskare, väljarpanel och summerare kopplas ihop med LangGraph.
 - Börja med CLI och hålla vägen öppen för Streamlit.
 
+## Demo
+
+Se [party_debate_agent_demo.pptx](party_debate_agent_demo.pptx) för en kort demo-presentation av projektet.
+
 ## Installation
 
 ```bash
